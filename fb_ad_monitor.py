@@ -190,12 +190,18 @@ def scrape_brand(page, brand: dict) -> list[dict]:
 
         def on_response(response):
             resp_url = response.url
-            if any(ext in resp_url for ext in [".mp4", ".mov", ".webm"]):
+            # Real ad videos come from video-*.xx.fbcdn.net or similar video CDNs
+            if ("fbcdn.net" in resp_url or "cdninstagram" in resp_url) and \
+               any(ext in resp_url for ext in [".mp4", ".mov", ".webm"]):
                 if resp_url not in captured["videos"]:
                     captured["videos"].append(resp_url)
-            elif any(ext in resp_url for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp"]):
-                if ("fbcdn" in resp_url or "cdninstagram" in resp_url) and resp_url not in captured["images"]:
-                    captured["images"].append(resp_url)
+            # Real ad images: t39.35426 is the ad creative CDN path on fbcdn
+            # Exclude: static.xx.fbcdn.net (UI sprites), rsrc.php (UI assets),
+            #          t1.30497 (profile pics), hads-ak (old ad thumbnails)
+            elif "t39.35426" in resp_url and \
+                 any(ext in resp_url for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp"]) and \
+                 resp_url not in captured["images"]:
+                captured["images"].append(resp_url)
 
         page.on("response", on_response)
 
@@ -230,12 +236,13 @@ def scrape_brand(page, brand: dict) -> list[dict]:
                     .filter(s => s.startsWith('http'))
             """)
 
-            # Extract images directly from DOM (min 200px to skip icons)
+            # Extract images directly from DOM
+            # Only t39.35426 path = ad creative CDN; exclude UI sprites (rsrc.php, static.xx, t1.30497)
             dom_images = page.evaluate("""
                 () => Array.from(document.querySelectorAll('img'))
                     .filter(img => img.naturalWidth >= 200 && img.naturalHeight >= 200)
                     .map(img => img.src)
-                    .filter(src => src && (src.includes('fbcdn') || src.includes('cdninstagram')))
+                    .filter(src => src && src.includes('t39.35426'))
             """)
 
         except PWTimeout:
