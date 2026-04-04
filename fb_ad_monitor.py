@@ -153,10 +153,26 @@ def scrape_brand(page, brand: dict) -> list[dict]:
         log.warning(f"  Timeout loading page for {brand_name}")
         return []
 
-    # Scroll to load more ads
-    for _ in range(5):
+    # Scroll aggressively to load ALL ads (infinite scroll)
+    log.info(f"  [{brand_name}] scrolling to load all ads...")
+    prev_count = 0
+    no_change_rounds = 0
+    for scroll_round in range(60):  # max 60 scrolls (~300 ads)
         page.keyboard.press("End")
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(2500)
+        # Check how many ad IDs are visible now
+        current_count = page.evaluate("""
+            () => (document.body.innerText.match(/Library ID:/g) || []).length
+        """)
+        log.info(f"  [{brand_name}] scroll {scroll_round+1}: {current_count} ads visible")
+        if current_count == prev_count:
+            no_change_rounds += 1
+            if no_change_rounds >= 3:  # 3 scrolls with no new ads = done
+                log.info(f"  [{brand_name}] no new ads after 3 scrolls — stopping")
+                break
+        else:
+            no_change_rounds = 0
+        prev_count = current_count
 
     # Extract all ad IDs and start dates from the listing page
     raw_ads = page.evaluate("""
