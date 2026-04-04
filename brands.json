@@ -36,6 +36,10 @@
     "url": "https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&view_all_page_id=61556225936558&search_type=page&media_type=all"
   },
   {
+    "name": "Consumer Digest Online",
+    "url": "https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&is_targeted_country=false&media_type=all&q=consumerdigestonline.com&search_type=keyword_unordered&sort_data[mode]=total_impressions&sort_data[direction]=desc"
+  },
+  {
     "name": "Clarifion",
     "url": "https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&q=clarifion&search_type=keyword_unordered&sort_data[direction]=desc&sort_data[mode]=total_impressions",
     "group": "competitors/air purifiers",
