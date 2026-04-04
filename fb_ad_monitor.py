@@ -136,32 +136,15 @@ def build_url(brand: dict) -> str:
 
 def scrape_brand(page, brand: dict) -> list[dict]:
     """
-    Navigate to the Ad Library page for a brand, scroll to load all ads,
-    and extract ad metadata + media URLs from the DOM.
-    Returns a list of ad dicts.
+    Navigate to the Ad Library page for a brand, collect all ad IDs and dates,
+    then visit each ad's individual detail page to extract the correct media.
+    Returns a list of ad dicts with accurate per-ad media.
     """
     url = build_url(brand)
     brand_name = brand.get("name", "Unknown")
     log.info(f"  Scraping: {url}")
 
-    captured_media = {}   # ad_id → {"videos": [], "images": []}
-
-    # Intercept network responses to capture media URLs as they load
-    def on_response(response):
-        resp_url = response.url
-        if any(ext in resp_url for ext in [".mp4", ".mov", ".webm"]):
-            # Try to associate with an ad — we'll match by order later
-            captured_media.setdefault("_videos", [])
-            if resp_url not in captured_media["_videos"]:
-                captured_media["_videos"].append(resp_url)
-        elif any(ext in resp_url for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp"]):
-            if "fbcdn" in resp_url or "cdninstagram" in resp_url:
-                captured_media.setdefault("_images", [])
-                if resp_url not in captured_media["_images"]:
-                    captured_media["_images"].append(resp_url)
-
-    page.on("response", on_response)
-
+    # ── Step 1: Load the brand listing page and collect ad IDs + dates ────────
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=45000)
         page.wait_for_timeout(4000)
@@ -169,143 +152,143 @@ def scrape_brand(page, brand: dict) -> list[dict]:
         log.warning(f"  Timeout loading page for {brand_name}")
         return []
 
-    # Scroll down to load more ads (up to ~5 scrolls)
+    # Scroll to load more ads
     for _ in range(5):
         page.keyboard.press("End")
         page.wait_for_timeout(2000)
 
-    # ── Extract ad data from DOM ──────────────────────────────────────────────
-    ads = page.evaluate("""
+    # Extract all ad IDs and start dates from the listing page
+    raw_ads = page.evaluate("""
         () => {
             const results = [];
             const bodyText = document.body.innerText;
-
-            // Match all ad blocks by Library ID
             const idPattern = /Library ID:\\s*(\\d+)/g;
             const datePattern = /Started running on ([A-Za-z]+ \\d+, \\d{4})/g;
-
-            let idMatch, dateMatch;
-            const ids = [];
-            const dates = [];
-
-            while ((idMatch = idPattern.exec(bodyText)) !== null) {
-                ids.push(idMatch[1]);
-            }
-            while ((dateMatch = datePattern.exec(bodyText)) !== null) {
-                dates.push(dateMatch[1]);
-            }
-
-            // Get all ad card elements for richer data
-            // Facebook renders each ad in a container with the library ID visible
-            const allText = document.body.innerHTML;
-
+            const ids = [], dates = [];
+            let m;
+            while ((m = idPattern.exec(bodyText)) !== null) ids.push(m[1]);
+            while ((m = datePattern.exec(bodyText)) !== null) dates.push(m[1]);
             for (let i = 0; i < ids.length; i++) {
-                results.push({
-                    id: ids[i],
-                    start_date: dates[i] || "Unknown",
-                });
+                results.push({ id: ids[i], start_date: dates[i] || "Unknown" });
             }
-
             return results;
         }
     """)
 
-    # ── Extract videos per ad by visiting each ad's detail ───────────────────
-    # Also grab all videos/images currently on the page
-    page_videos = page.evaluate("""
-        () => Array.from(document.querySelectorAll('video'))
-            .map(v => ({ src: v.src || v.currentSrc, poster: v.poster }))
-            .filter(v => v.src && v.src.startsWith('http'))
-    """)
+    log.info(f"  [{brand_name}] found {len(raw_ads)} ad IDs on listing page")
 
-    page_images = page.evaluate("""
-        () => Array.from(document.querySelectorAll('img'))
-            .filter(img => img.naturalWidth > 150 && img.naturalHeight > 150)
-            .map(img => img.src)
-            .filter(src => src && (src.includes('fbcdn') || src.includes('cdninstagram')))
-    """)
-
-    # ── Get ad copy text per card ─────────────────────────────────────────────
-    ad_copies = page.evaluate("""
-        () => {
-            // Each ad card has a sponsored label and body text
-            const copies = [];
-            // Look for text blocks that appear after "Sponsored"
-            const allDivs = document.querySelectorAll('div[role="button"]');
-            for (const div of allDivs) {
-                const text = div.innerText || '';
-                if (text.length > 20 && text.length < 1000 && !text.includes('Library ID')) {
-                    copies.push(text.trim());
-                }
-            }
-            return copies;
-        }
-    """)
-
-    # ── Get page/advertiser names ─────────────────────────────────────────────
-    page_names = page.evaluate("""
-        () => Array.from(document.querySelectorAll('a[href*="/ads/library"]'))
-            .map(a => a.innerText.trim())
-            .filter(t => t.length > 0 && t.length < 100)
-    """)
-
-    # ── Detect media type per ad ──────────────────────────────────────────────
-    # Map videos to ads by position (video i → ad i roughly)
-    video_srcs = [v["src"] for v in page_videos if v.get("src")]
-    image_srcs = page_images or []
-
-    # Also include network-captured videos
-    net_videos = captured_media.get("_videos", [])
-    for nv in net_videos:
-        if nv not in video_srcs:
-            video_srcs.append(nv)
-
-    net_images = captured_media.get("_images", [])
-    for ni in net_images:
-        if ni not in image_srcs:
-            image_srcs.append(ni)
-
-    # Build enriched ad list
+    # ── Step 2: Visit each ad's detail page to get accurate media ─────────────
     enriched = []
-    for i, ad in enumerate(ads):
+    for ad in raw_ads:
         ad_id = ad["id"]
-        start_date = ad["start_date"]
+        detail_url = f"https://www.facebook.com/ads/library/?id={ad_id}"
 
-        # Assign copy text (rough positional match)
-        copy = ad_copies[i] if i < len(ad_copies) else ""
+        ad_media = []
+        ad_copy = ""
+        media_type = "unknown"
+        captured = {"videos": [], "images": []}
 
-        # Assign media (rough positional match — 1 video per ad)
-        if i < len(video_srcs):
+        def on_response(response):
+            resp_url = response.url
+            if any(ext in resp_url for ext in [".mp4", ".mov", ".webm"]):
+                if resp_url not in captured["videos"]:
+                    captured["videos"].append(resp_url)
+            elif any(ext in resp_url for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp"]):
+                if ("fbcdn" in resp_url or "cdninstagram" in resp_url) and resp_url not in captured["images"]:
+                    captured["images"].append(resp_url)
+
+        page.on("response", on_response)
+
+        try:
+            page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(3000)
+
+            # Extract copy text
+            ad_copy = page.evaluate("""
+                () => {
+                    const el = document.querySelector('div[data-testid="ad-card-body"]')
+                        || document.querySelector('div._4bl9')
+                        || document.querySelector('div[class*="_7jyr"]');
+                    if (el) return el.innerText.trim();
+                    // Fallback: grab largest text block on the page
+                    let best = '';
+                    for (const d of document.querySelectorAll('div, p, span')) {
+                        const t = (d.innerText || '').trim();
+                        if (t.length > best.length && t.length < 2000
+                            && !t.includes('Library ID') && !t.includes('Ad Library')) {
+                            best = t;
+                        }
+                    }
+                    return best;
+                }
+            """) or ""
+
+            # Extract videos directly from DOM
+            dom_videos = page.evaluate("""
+                () => Array.from(document.querySelectorAll('video'))
+                    .map(v => v.src || v.currentSrc || '')
+                    .filter(s => s.startsWith('http'))
+            """)
+
+            # Extract images directly from DOM (min 200px to skip icons)
+            dom_images = page.evaluate("""
+                () => Array.from(document.querySelectorAll('img'))
+                    .filter(img => img.naturalWidth >= 200 && img.naturalHeight >= 200)
+                    .map(img => img.src)
+                    .filter(src => src && (src.includes('fbcdn') || src.includes('cdninstagram')))
+            """)
+
+        except PWTimeout:
+            log.warning(f"    Timeout on detail page for ad {ad_id}")
+            page.remove_listener("response", on_response)
+            enriched.append({
+                "id": ad_id,
+                "start_date": ad["start_date"],
+                "copy": "",
+                "media_type": "unknown",
+                "media_urls": [],
+                "snapshot_url": detail_url,
+            })
+            continue
+        except Exception as e:
+            log.warning(f"    Error on detail page for ad {ad_id}: {e}")
+            page.remove_listener("response", on_response)
+            continue
+
+        page.remove_listener("response", on_response)
+
+        # Merge DOM + network-captured media, prefer DOM (more reliable)
+        all_videos = list(dict.fromkeys(dom_videos + captured["videos"]))
+        all_images = list(dict.fromkeys(dom_images + captured["images"]))
+
+        if all_videos:
             media_type = "video"
-            media_urls = [video_srcs[i]]
-        elif image_srcs:
-            # Use images from the pool
-            # Carousel: grab up to 3 consecutive images
-            start_img = min(i * 2, len(image_srcs) - 1)
-            end_img = min(start_img + 3, len(image_srcs))
-            ad_images = image_srcs[start_img:end_img]
-            if len(ad_images) > 1:
+            ad_media = all_videos[:1]  # primary video only
+        elif all_images:
+            if len(all_images) > 1:
                 media_type = "carousel"
-            elif any(".gif" in u for u in ad_images):
+            elif any(".gif" in u for u in all_images):
                 media_type = "gif"
             else:
                 media_type = "image"
-            media_urls = ad_images
+            ad_media = all_images[:5]  # up to 5 carousel slides
         else:
             media_type = "unknown"
-            media_urls = []
+            ad_media = []
 
         enriched.append({
             "id": ad_id,
-            "start_date": start_date,
-            "copy": copy[:500],
+            "start_date": ad["start_date"],
+            "copy": ad_copy[:500],
             "media_type": media_type,
-            "media_urls": media_urls,
-            "snapshot_url": f"https://www.facebook.com/ads/library/?id={ad_id}",
+            "media_urls": ad_media,
+            "snapshot_url": detail_url,
         })
 
-    page.remove_listener("response", on_response)
-    log.info(f"  [{brand_name}] found {len(enriched)} ads on page")
+        log.info(f"    Ad {ad_id}: {media_type}, {len(ad_media)} media file(s)")
+        time.sleep(1)  # polite delay between detail pages
+
+    log.info(f"  [{brand_name}] enriched {len(enriched)} ads with accurate media")
     return enriched
 
 # ─── Media Download ────────────────────────────────────────────────────────────
