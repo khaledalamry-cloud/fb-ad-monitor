@@ -477,27 +477,22 @@ def run():
                 log.error(f"  Scrape failed for {brand_name}: {e}")
                 continue
 
-            # Thread tracking for this brand
-            brand_threads = {
-                VIDEO_CHANNEL: None,
-                STATIC_CHANNEL: None
-            }
+            brand_url = build_url(brand)
 
+            # ── Pre-filter ads for this brand ────────────────────────────────
+            eligible_ads = []
             for ad in ads:
                 ad_id = ad["id"]
                 start_date = ad.get("start_date", "")
 
-                # Skip ads outside the lookback window
                 if not is_within_lookback(start_date):
                     log.debug(f"  Skipping old ad {ad_id} ({start_date})")
                     continue
 
-                # Skip already-seen ads
                 if is_seen(ad_id):
                     log.debug(f"  Already seen: {ad_id}")
                     continue
 
-                # Filter English only
                 copy_text = ad.get("copy", "")
                 if copy_text.strip():
                     try:
@@ -506,9 +501,27 @@ def run():
                             log.debug(f"  Skipping non-English ad {ad_id} (detected: {lang})")
                             continue
                     except LangDetectException:
-                        # If we can't detect language, we'll let it pass or skip? Let's let it pass if very short
                         pass
 
+                eligible_ads.append(ad)
+
+            if not eligible_ads:
+                log.info(f"  No new eligible ads for {brand_name}")
+                continue
+
+            # Count per channel
+            video_count  = sum(1 for a in eligible_ads if a.get("media_type") == "video")
+            static_count = sum(1 for a in eligible_ads if a.get("media_type") != "video")
+
+            # Thread tracking for this brand
+            brand_threads = {
+                VIDEO_CHANNEL: None,
+                STATIC_CHANNEL: None
+            }
+
+            for ad in eligible_ads:
+                ad_id = ad["id"]
+                start_date = ad.get("start_date", "")
                 log.info(f"  New ad: {ad_id} | {start_date} | {ad['media_type']}")
 
                 # Download media
@@ -520,10 +533,14 @@ def run():
 
                 # Create a parent thread message if we don't have one for this channel
                 if not brand_threads[channel]:
+                    count_for_channel = video_count if channel == VIDEO_CHANNEL else static_count
                     try:
                         resp = slack.chat_postMessage(
                             channel=channel,
-                            text=f"📁 *New Ads for {brand_name}* (Thread below 👇)"
+                            text=(
+                                f"📁 *{brand_name}* — *{count_for_channel} new ad{'s' if count_for_channel != 1 else ''} today*\n"
+                                f"🔗 <{brand_url}|View in Ad Library>"
+                            )
                         )
                         brand_threads[channel] = resp["ts"]
                     except SlackApiError as e:
