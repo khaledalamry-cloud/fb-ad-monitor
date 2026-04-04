@@ -24,6 +24,7 @@ import argparse
 import requests
 import schedule
 import shutil
+from langdetect import detect, LangDetectException
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from dotenv import load_dotenv
@@ -365,7 +366,7 @@ def download_media(ad: dict, brand_name: str) -> list[Path]:
 # ─── Slack Posting ─────────────────────────────────────────────────────────────
 
 def post_to_slack(client: WebClient, channel: str, ad: dict,
-                  brand_name: str, files: list[Path]):
+                  brand_name: str, files: list[Path], thread_ts: str = None):
     """Upload media and post ad metadata to Slack."""
     ad_id = ad["id"]
     media_type = ad.get("media_type", "unknown")
@@ -392,6 +393,7 @@ def post_to_slack(client: WebClient, channel: str, ad: dict,
                     file=f,
                     filename=primary.name,
                     initial_comment=msg,
+                    thread_ts=thread_ts,
                 )
             # Extra carousel slides
             for extra in files[1:]:
@@ -401,10 +403,11 @@ def post_to_slack(client: WebClient, channel: str, ad: dict,
                         file=f,
                         filename=extra.name,
                         initial_comment=f"↑ Carousel slide",
+                        thread_ts=thread_ts,
                     )
         else:
             # No media — post text + link only
-            client.chat_postMessage(channel=channel, text=msg)
+            client.chat_postMessage(channel=channel, text=msg, thread_ts=thread_ts)
 
         log.info(f"  ✅ Posted ad {ad_id} ({media_type}) → Slack")
 
@@ -474,6 +477,12 @@ def run():
                 log.error(f"  Scrape failed for {brand_name}: {e}")
                 continue
 
+            # Thread tracking for this brand
+            brand_threads = {
+                VIDEO_CHANNEL: None,
+                STATIC_CHANNEL: None
+            }
+
             for ad in ads:
                 ad_id = ad["id"]
                 start_date = ad.get("start_date", "")
@@ -488,6 +497,18 @@ def run():
                     log.debug(f"  Already seen: {ad_id}")
                     continue
 
+                # Filter English only
+                copy_text = ad.get("copy", "")
+                if copy_text.strip():
+                    try:
+                        lang = detect(copy_text)
+                        if lang != "en":
+                            log.debug(f"  Skipping non-English ad {ad_id} (detected: {lang})")
+                            continue
+                    except LangDetectException:
+                        # If we can't detect language, we'll let it pass or skip? Let's let it pass if very short
+                        pass
+
                 log.info(f"  New ad: {ad_id} | {start_date} | {ad['media_type']}")
 
                 # Download media
@@ -497,8 +518,19 @@ def run():
                 media_type = ad.get("media_type", "unknown")
                 channel = VIDEO_CHANNEL if media_type == "video" else STATIC_CHANNEL
 
-                # Post to Slack
-                post_to_slack(slack, channel, ad, brand_name, files)
+                # Create a parent thread message if we don't have one for this channel
+                if not brand_threads[channel]:
+                    try:
+                        resp = slack.chat_postMessage(
+                            channel=channel,
+                            text=f"📁 *New Ads for {brand_name}* (Thread below 👇)"
+                        )
+                        brand_threads[channel] = resp["ts"]
+                    except SlackApiError as e:
+                        log.error(f"  Failed to create thread for {brand_name}: {e}")
+
+                # Post to Slack in the thread
+                post_to_slack(slack, channel, ad, brand_name, files, thread_ts=brand_threads[channel])
 
                 # Mark as seen
                 mark_seen(ad_id, brand_name, media_type)
