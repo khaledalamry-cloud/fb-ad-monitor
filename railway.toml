@@ -3,6 +3,6 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "python3 fb_ad_monitor.py --channel C0AQUE8H17U --hours 48"
+startCommand = "python3 fb_ad_monitor.py --channel C0AQUE8H17U --hours 48 --reset"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3

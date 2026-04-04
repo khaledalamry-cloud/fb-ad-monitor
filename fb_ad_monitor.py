@@ -609,6 +609,26 @@ def run(channel_filter: str = None, lookback_hours: int = None):
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 
+def reset_seen_for_channel(channel_id: str, brands: list):
+    """Delete all seen_ads entries for brands assigned to the given channel."""
+    brand_names = [
+        b["name"] for b in brands
+        if b.get("slack_channel", "") == channel_id
+    ]
+    if not brand_names:
+        log.warning(f"No brands found for channel {channel_id} — nothing to reset.")
+        return
+    conn = sqlite3.connect(DB_PATH)
+    placeholders = ",".join("?" * len(brand_names))
+    deleted = conn.execute(
+        f"DELETE FROM seen_ads WHERE brand IN ({placeholders})",
+        brand_names
+    ).rowcount
+    conn.commit()
+    conn.close()
+    log.info(f"Reset: deleted {deleted} seen_ads entries for {len(brand_names)} brands in channel {channel_id}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Facebook Ad Library Monitor → Slack (no API token needed)"
@@ -629,7 +649,22 @@ def main():
         "--hours", type=int, default=None,
         help="Override lookback window in hours for this run only (e.g. 48)",
     )
+    parser.add_argument(
+        "--reset", action="store_true",
+        help="Clear seen_ads for the specified --channel before running (forces re-post of all ads)",
+    )
     args = parser.parse_args()
+
+    init_db()
+
+    if args.reset and args.channel:
+        try:
+            with open(BRANDS_FILE) as f:
+                brands = json.load(f)
+        except Exception as e:
+            log.error(f"Could not load brands file: {e}")
+            return
+        reset_seen_for_channel(args.channel, brands)
 
     if args.schedule:
         log.info(f"Scheduled to run daily at {args.time}")
