@@ -509,15 +509,19 @@ def run():
                 log.info(f"  No new eligible ads for {brand_name}")
                 continue
 
-            # Count per channel
+            # Count per media type
             video_count  = sum(1 for a in eligible_ads if a.get("media_type") == "video")
             static_count = sum(1 for a in eligible_ads if a.get("media_type") != "video")
 
-            # Thread tracking for this brand
-            brand_threads = {
-                VIDEO_CHANNEL: None,
-                STATIC_CHANNEL: None
-            }
+            # Determine channel routing for this brand
+            # Brands with a slack_channel override send ALL ads (videos + statics)
+            # to that single channel, with separate parent messages per media type.
+            # Default brands use VIDEO_CHANNEL / STATIC_CHANNEL split.
+            brand_override_channel = brand.get("slack_channel", "")
+
+            # Thread tracking: keyed by (channel, media_type_label)
+            # e.g. ("C0AQUE8H17U", "video") or ("C0AQU7NJZS6", "video")
+            brand_threads = {}
 
             for ad in eligible_ads:
                 ad_id = ad["id"]
@@ -529,25 +533,45 @@ def run():
 
                 # Route to correct Slack channel
                 media_type = ad.get("media_type", "unknown")
-                channel = VIDEO_CHANNEL if media_type == "video" else STATIC_CHANNEL
+                is_video = media_type == "video"
 
-                # Create a parent thread message if we don't have one for this channel
-                if not brand_threads[channel]:
-                    count_for_channel = video_count if channel == VIDEO_CHANNEL else static_count
+                if brand_override_channel:
+                    # Competitor / custom channel: all ads go here
+                    channel = brand_override_channel
+                    type_label = "video" if is_video else "static"
+                    type_emoji = "🎬" if is_video else "🖼️"
+                    type_word  = "Videos" if is_video else "Statics"
+                    count_for_type = video_count if is_video else static_count
+                else:
+                    # Default split: videos vs statics channels
+                    channel = VIDEO_CHANNEL if is_video else STATIC_CHANNEL
+                    type_label = "video" if is_video else "static"
+                    type_emoji = "🎬" if is_video else "🖼️"
+                    type_word  = "Videos" if is_video else "Statics"
+                    count_for_type = video_count if is_video else static_count
+
+                thread_key = (channel, type_label)
+
+                # Create a parent thread message if we don't have one for this channel+type
+                if thread_key not in brand_threads:
                     try:
                         resp = slack.chat_postMessage(
                             channel=channel,
                             text=(
-                                f"📁 *{brand_name}* — *{count_for_channel} new ad{'s' if count_for_channel != 1 else ''} today*\n"
+                                f"{type_emoji} *{brand_name} — {type_word}* — "
+                                f"*{count_for_type} new ad{'s' if count_for_type != 1 else ''} today*\n"
                                 f"🔗 <{brand_url}|View in Ad Library>"
                             )
                         )
-                        brand_threads[channel] = resp["ts"]
+                        brand_threads[thread_key] = resp["ts"]
                     except SlackApiError as e:
                         log.error(f"  Failed to create thread for {brand_name}: {e}")
 
                 # Post to Slack in the thread
-                post_to_slack(slack, channel, ad, brand_name, files, thread_ts=brand_threads[channel])
+                post_to_slack(
+                    slack, channel, ad, brand_name, files,
+                    thread_ts=brand_threads.get(thread_key)
+                )
 
                 # Mark as seen
                 mark_seen(ad_id, brand_name, media_type)
