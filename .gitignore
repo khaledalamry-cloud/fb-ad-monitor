@@ -1,0 +1,7 @@
+.env
+seen_ads.db
+downloads/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
