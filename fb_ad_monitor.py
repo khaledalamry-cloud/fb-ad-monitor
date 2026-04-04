@@ -111,10 +111,12 @@ def parse_start_date(date_str: str) -> datetime | None:
     return datetime(int(m.group(3)), month, int(m.group(2)), tzinfo=timezone.utc)
 
 def is_within_lookback(date_str: str, hours_override: int = None) -> bool:
+    hours = hours_override if hours_override is not None else LOOKBACK_HOURS
+    if hours == 0:
+        return True  # 0 = unlimited, include all ads regardless of date
     dt = parse_start_date(date_str)
     if dt is None:
         return True  # unknown date → include it
-    hours = hours_override if hours_override else LOOKBACK_HOURS
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
     return dt >= cutoff
 
