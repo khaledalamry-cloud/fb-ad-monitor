@@ -110,11 +110,12 @@ def parse_start_date(date_str: str) -> datetime | None:
         return None
     return datetime(int(m.group(3)), month, int(m.group(2)), tzinfo=timezone.utc)
 
-def is_within_lookback(date_str: str) -> bool:
+def is_within_lookback(date_str: str, hours_override: int = None) -> bool:
     dt = parse_start_date(date_str)
     if dt is None:
         return True  # unknown date → include it
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=LOOKBACK_HOURS)
+    hours = hours_override if hours_override else LOOKBACK_HOURS
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
     return dt >= cutoff
 
 # ─── Scraper ──────────────────────────────────────────────────────────────────
@@ -418,9 +419,17 @@ def cleanup_downloads(days: int = 7):
 
 # ─── Main Run ─────────────────────────────────────────────────────────────────
 
-def run():
+def run(channel_filter: str = None, lookback_hours: int = None):
+    """
+    channel_filter: if set, only process brands whose slack_channel matches this value.
+                    Use "default" to process brands with no slack_channel override.
+    lookback_hours: override the global LOOKBACK_HOURS for this run only.
+    """
+    effective_lookback = lookback_hours if lookback_hours else LOOKBACK_HOURS
     log.info("=" * 60)
     log.info(f"Facebook Ad Monitor — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    if channel_filter:
+        log.info(f"Channel filter: {channel_filter} | Lookback: {effective_lookback}h")
     log.info("=" * 60)
 
     if not SLACK_TOKEN:
@@ -436,6 +445,14 @@ def run():
     except Exception as e:
         log.error(f"Could not load brands.json: {e}")
         return
+
+    # Apply channel filter if specified
+    if channel_filter:
+        if channel_filter == "default":
+            brands = [b for b in brands if not b.get("slack_channel")]
+        else:
+            brands = [b for b in brands if b.get("slack_channel") == channel_filter]
+        log.info(f"Filtered to {len(brands)} brand(s) for channel {channel_filter}")
 
     init_db()
     slack = WebClient(token=SLACK_TOKEN)
@@ -475,7 +492,7 @@ def run():
                 ad_id = ad["id"]
                 start_date = ad.get("start_date", "")
 
-                if not is_within_lookback(start_date):
+                if not is_within_lookback(start_date, hours_override=effective_lookback):
                     log.debug(f"  Skipping old ad {ad_id} ({start_date})")
                     continue
 
@@ -588,6 +605,14 @@ def main():
         "--time", default=RUN_TIME,
         help=f"Daily run time in 24h format (default: {RUN_TIME})",
     )
+    parser.add_argument(
+        "--channel", default=None,
+        help="Only process brands assigned to this Slack channel ID (use 'default' for brands with no channel override)",
+    )
+    parser.add_argument(
+        "--hours", type=int, default=None,
+        help="Override lookback window in hours for this run only (e.g. 48)",
+    )
     args = parser.parse_args()
 
     if args.schedule:
@@ -598,7 +623,7 @@ def main():
             schedule.run_pending()
             time.sleep(30)
     else:
-        run()
+        run(channel_filter=args.channel, lookback_hours=args.hours)
 
 if __name__ == "__main__":
     main()
