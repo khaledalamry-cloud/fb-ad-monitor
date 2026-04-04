@@ -51,7 +51,7 @@ DOWNLOAD_DIR.mkdir(exist_ok=True)
 SLACK_TOKEN     = os.getenv("SLACK_BOT_TOKEN", "")
 VIDEO_CHANNEL   = os.getenv("SLACK_VIDEO_CHANNEL", "")
 STATIC_CHANNEL  = os.getenv("SLACK_STATIC_CHANNEL", "")
-LOOKBACK_HOURS  = int(os.getenv("LOOKBACK_HOURS", "48"))
+LOOKBACK_HOURS  = int(os.getenv("LOOKBACK_HOURS", "24"))
 RUN_TIME        = os.getenv("RUN_TIME", "06:00")
 
 # ─── Database (deduplication) ─────────────────────────────────────────────────
