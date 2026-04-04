@@ -393,27 +393,48 @@ def post_to_slack(client: WebClient, channel: str, ad: dict,
         f"<{snapshot_url}|View in Ad Library>"
     )
 
+    def _upload_with_retry(upload_fn, retries=3, delay=5):
+        """Retry a Slack upload on transient SSL/network errors."""
+        import ssl
+        for attempt in range(1, retries + 1):
+            try:
+                upload_fn()
+                return True
+            except (SlackApiError, ssl.SSLError, OSError, Exception) as e:
+                err_str = str(e)
+                if attempt < retries and any(x in err_str for x in ["SSL", "EOF", "Connection", "timeout", "reset"]):
+                    log.warning(f"  Upload attempt {attempt} failed ({err_str[:80]}), retrying in {delay}s...")
+                    time.sleep(delay)
+                else:
+                    log.error(f"  Upload failed after {attempt} attempt(s): {err_str[:120]}")
+                    return False
+        return False
+
     try:
         if files:
             primary = files[0]
-            with open(primary, "rb") as f:
-                client.files_upload_v2(
-                    channel=channel,
-                    file=f,
-                    filename=primary.name,
-                    initial_comment=msg,
-                    thread_ts=thread_ts,
-                )
-            # Extra carousel slides
-            for extra in files[1:]:
-                with open(extra, "rb") as f:
+            def _upload_primary():
+                with open(primary, "rb") as f:
                     client.files_upload_v2(
                         channel=channel,
                         file=f,
-                        filename=extra.name,
-                        initial_comment=f"↑ Carousel slide",
+                        filename=primary.name,
+                        initial_comment=msg,
                         thread_ts=thread_ts,
                     )
+            _upload_with_retry(_upload_primary)
+            # Extra carousel slides
+            for extra in files[1:]:
+                def _upload_extra(path=extra):
+                    with open(path, "rb") as f:
+                        client.files_upload_v2(
+                            channel=channel,
+                            file=f,
+                            filename=path.name,
+                            initial_comment=f"↑ Carousel slide",
+                            thread_ts=thread_ts,
+                        )
+                _upload_with_retry(_upload_extra)
         else:
             # No media — post text + link only
             client.chat_postMessage(channel=channel, text=msg, thread_ts=thread_ts)
