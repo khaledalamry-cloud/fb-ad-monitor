@@ -2,5 +2,33 @@
   {
     "name": "Lemme",
     "url": "https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&is_targeted_country=false&media_type=all&q=lemmelive.com&search_type=keyword_unordered&sort_data[direction]=desc&sort_data[mode]=total_impressions"
+  },
+  {
+    "name": "Obvi",
+    "url": "https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&view_all_page_id=100064054959168&search_type=page&media_type=all"
+  },
+  {
+    "name": "PetLab Co.",
+    "url": "https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&view_all_page_id=177930899801067&search_type=page&media_type=all"
+  },
+  {
+    "name": "Create Wellness",
+    "url": "https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&view_all_page_id=100086271863027&search_type=page&media_type=all"
+  },
+  {
+    "name": "Arrae",
+    "url": "https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&view_all_page_id=108401623899597&search_type=page&media_type=all"
+  },
+  {
+    "name": "Armra",
+    "url": "https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&view_all_page_id=109196117495123&search_type=page&media_type=all"
+  },
+  {
+    "name": "Happy Mammoth",
+    "url": "https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&view_all_page_id=1343771369029582&search_type=page&media_type=all"
+  },
+  {
+    "name": "Ryze",
+    "url": "https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&view_all_page_id=107940537227344&search_type=page&media_type=all"
   }
 ]
