@@ -669,8 +669,9 @@ def main():
         reset_seen_for_channel(args.channel, brands)
 
     if args.schedule:
-        log.info(f"Scheduled to run daily at {args.time}")
-        schedule.every().day.at(args.time).do(run)
+        interval_hours = int(os.getenv("RUN_INTERVAL_HOURS", "3"))
+        log.info(f"Scheduled to run every {interval_hours} hour(s)")
+        schedule.every(interval_hours).hours.do(run)
         run()  # also run immediately on startup
         while True:
             schedule.run_pending()
