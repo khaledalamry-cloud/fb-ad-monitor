@@ -293,7 +293,7 @@ def run():
             continue
 
         try:
-            raw_ads = run_apify_scraper(brand_url, max_items=50)
+            raw_ads = run_apify_scraper(brand_url, max_items=15)
         except Exception as e:
             log.error(f"  Apify error for {brand_name}: {e}")
             brand_results.append((brand_name, -1))
