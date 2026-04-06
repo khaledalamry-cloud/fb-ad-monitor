@@ -215,13 +215,46 @@ def post_ad_to_slack(slack: WebClient, channel: str, ad: dict, brand_name: str, 
 
     try:
         if is_video and ad["video_url"]:
-            msg_text = f"{emoji} *{brand_name}* — video ad\n{ad['video_url']}\n\n{text}"
-            slack.chat_postMessage(
-                channel=channel,
-                text=msg_text,
-                thread_ts=thread_ts,
-                unfurl_links=True,
-            )
+            # Download video and upload directly to Slack
+            try:
+                vid_resp = requests.get(ad["video_url"], timeout=60, stream=True)
+                vid_resp.raise_for_status()
+                video_bytes = vid_resp.content
+                slack.files_upload_v2(
+                    channel=channel,
+                    content=video_bytes,
+                    filename="ad_video.mp4",
+                    initial_comment=f"{emoji} *{brand_name}* — video ad\n\n{text}",
+                    thread_ts=thread_ts,
+                )
+            except Exception as vid_err:
+                log.warning(f"    Could not upload video, trying thumbnail: {vid_err}")
+                # Fallback: upload thumbnail image if available
+                thumb_url = ad.get("video_thumb")
+                if thumb_url:
+                    try:
+                        thumb_resp = requests.get(thumb_url, timeout=20)
+                        thumb_resp.raise_for_status()
+                        slack.files_upload_v2(
+                            channel=channel,
+                            content=thumb_resp.content,
+                            filename="ad_thumbnail.jpg",
+                            initial_comment=f"{emoji} *{brand_name}* — video ad (thumbnail)\n\n{text}",
+                            thread_ts=thread_ts,
+                        )
+                    except Exception:
+                        # Last resort: post text with link
+                        slack.chat_postMessage(
+                            channel=channel,
+                            text=f"{emoji} *{brand_name}* — video ad\n{ad['video_url']}\n\n{text}",
+                            thread_ts=thread_ts,
+                        )
+                else:
+                    slack.chat_postMessage(
+                        channel=channel,
+                        text=f"{emoji} *{brand_name}* — video ad\n{ad['video_url']}\n\n{text}",
+                        thread_ts=thread_ts,
+                    )
         elif ad["image_urls"]:
             img_url = ad["image_urls"][0]
             try:
