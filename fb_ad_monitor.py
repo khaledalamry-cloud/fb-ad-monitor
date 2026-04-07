@@ -51,7 +51,7 @@ APIFY_TOKEN     = os.getenv("APIFY_TOKEN", "")
 APIFY_ACTOR_ID  = "curious_coder~facebook-ads-library-scraper"
 APIFY_BASE      = "https://api.apify.com/v2"
 
-RUN_INTERVAL_HOURS = int(os.getenv("RUN_INTERVAL_HOURS", "1"))
+RUN_INTERVAL_HOURS = int(os.getenv("RUN_INTERVAL_HOURS", "6"))
 
 # ─── Database ─────────────────────────────────────────────────────────────────
 def init_db():
@@ -64,6 +64,29 @@ def init_db():
             posted_at  TEXT
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS daily_summary (
+            summary_date  TEXT PRIMARY KEY,
+            posted_at     TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def already_posted_daily_summary() -> bool:
+    today = datetime.now().strftime("%Y-%m-%d")
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("SELECT 1 FROM daily_summary WHERE summary_date=?", (today,)).fetchone()
+    conn.close()
+    return row is not None
+
+def mark_daily_summary_posted():
+    today = datetime.now().strftime("%Y-%m-%d")
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT OR IGNORE INTO daily_summary VALUES (?,?)",
+        (today, datetime.now(timezone.utc).isoformat())
+    )
     conn.commit()
     conn.close()
 
@@ -384,17 +407,22 @@ def run():
     now_str = datetime.now().strftime("%b %d, %Y %H:%M")
 
     if total_new == 0:
-        summary = f"✅ *Ad Library Check Complete* — {now_str} CDT\nNo new ads found across {len(brands)} brands."
-        channels_to_notify = set([VIDEO_CHANNEL, STATIC_CHANNEL])
-        for b in brands:
-            if b.get("slack_channel"):
-                channels_to_notify.add(b["slack_channel"])
-        for ch in channels_to_notify:
-            if ch:
-                try:
-                    slack.chat_postMessage(channel=ch, text=summary)
-                except Exception:
-                    pass
+        if not already_posted_daily_summary():
+            summary = f"✅ *Ad Library Check Complete* — {now_str} CDT\nNo new ads found across {len(brands)} brands."
+            channels_to_notify = set([VIDEO_CHANNEL, STATIC_CHANNEL])
+            for b in brands:
+                if b.get("slack_channel"):
+                    channels_to_notify.add(b["slack_channel"])
+            for ch in channels_to_notify:
+                if ch:
+                    try:
+                        slack.chat_postMessage(channel=ch, text=summary)
+                    except Exception:
+                        pass
+            mark_daily_summary_posted()
+            log.info("Posted daily no-new-ads summary to Slack.")
+        else:
+            log.info("No new ads and daily summary already posted — skipping Slack notification.")
     else:
         log.info(f"✅ {total_new} new ad(s) posted across all brands.")
 
