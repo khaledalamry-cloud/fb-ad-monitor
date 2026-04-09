@@ -162,10 +162,12 @@ def parse_ad(item: dict) -> dict:
     snap = item.get("snapshot", {})
     images = snap.get("images", []) or []
     videos = snap.get("videos", []) or []
+    cards = snap.get("cards", []) or []
 
     media_type = "video" if videos else "image"
 
     image_urls = []
+    # First try top-level images
     for img in images:
         if isinstance(img, dict):
             url = img.get("original_image_url") or img.get("url") or img.get("resized_image_url")
@@ -173,6 +175,12 @@ def parse_ad(item: dict) -> dict:
                 image_urls.append(url)
         elif isinstance(img, str):
             image_urls.append(img)
+    # Fallback: pull images from cards
+    if not image_urls:
+        for card in cards:
+            url = card.get("original_image_url") or card.get("resized_image_url")
+            if url and url not in image_urls:
+                image_urls.append(url)
 
     video_url = None
     video_thumb = None
@@ -181,11 +189,31 @@ def parse_ad(item: dict) -> dict:
         if isinstance(v, dict):
             video_url = v.get("video_hd_url") or v.get("video_sd_url")
             video_thumb = v.get("video_preview_image_url")
+    # Fallback: pull video from cards
+    if not video_url:
+        for card in cards:
+            vurl = card.get("video_hd_url") or card.get("video_sd_url")
+            if vurl:
+                video_url = vurl
+                video_thumb = card.get("video_preview_image_url")
+                media_type = "video"
+                break
 
     body = snap.get("body", "")
     if isinstance(body, dict):
         body = body.get("text", "")
     body = (body or "").strip()
+    # Skip Facebook dynamic product template placeholders like {{product.brand}}
+    import re as _re
+    if _re.search(r'\{\{[^}]+\}\}', body):
+        # Try to get body from cards instead
+        card_body = ""
+        for card in snap.get("cards", []):
+            cb = (card.get("body") or "").strip()
+            if cb and not _re.search(r'\{\{[^}]+\}\}', cb):
+                card_body = cb
+                break
+        body = card_body  # Use card body, or empty string if all have templates
 
     start_ts = item.get("start_date")
     start_date_str = ""
