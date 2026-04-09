@@ -51,7 +51,7 @@ APIFY_TOKEN     = os.getenv("APIFY_TOKEN", "")
 APIFY_ACTOR_ID  = "curious_coder~facebook-ads-library-scraper"
 APIFY_BASE      = "https://api.apify.com/v2"
 
-RUN_INTERVAL_HOURS = int(os.getenv("RUN_INTERVAL_HOURS", "6"))
+RUN_INTERVAL_HOURS = int(os.getenv("RUN_INTERVAL_HOURS", "12"))
 
 # ─── Database ─────────────────────────────────────────────────────────────────
 def init_db():
